@@ -131,3 +131,8 @@ MAILERS = {
 }
 
 AUTH_USER_MODEL = "accounts.User"
+
+# после успешного входа
+LOGIN_REDIRECT_URL = '/'
+# после выхода
+LOGOUT_REDIRECT_URL = '/accounts/login/'

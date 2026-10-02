@@ -3,6 +3,10 @@ from django.urls import path, include
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    # Подключаем пути нашего журнала для главной страницы сайта
-    path('', include('journal.urls')), 
+
+    # Встроенные пути Django для входа и выхода
+    path('accounts/', include('django.contrib.auth.urls')),
+
+    # Пути журнала
+    path('', include('journal.urls')),
 ]

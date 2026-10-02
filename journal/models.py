@@ -65,27 +65,19 @@ class Lesson(models.Model):
 
 # 5. Оценка и посещаемость
 class Grade(models.Model):
-    MARKS = (
-        (5, 'Отлично (5)'),
-        (4, 'Хорошо (4)'),
-        (3, 'Удовл. (3)'),
-        (2, 'Неудовл. (2)'),
-    )
-
     lesson = models.ForeignKey(Lesson, on_delete=models.CASCADE, related_name="grades", verbose_name="Занятие")
     student = models.ForeignKey(StudentProfile, on_delete=models.CASCADE, related_name="grades", verbose_name="Студент")
 
-    # Оценка может быть пустой, если ставим просто "Н" (отсутствие)
-    value = models.PositiveSmallIntegerField(choices=MARKS, null=True, blank=True, verbose_name="Оценка")
+    # Мы убрали choices=MARKS. Теперь сюда можно записать любое положительное число!
+    value = models.PositiveSmallIntegerField(null=True, blank=True, verbose_name="Баллы / Оценка")
     is_absent = models.BooleanField(default=False, verbose_name="Отсутствовал (Н)")
 
     class Meta:
         verbose_name = "Оценка/Посещаемость"
         verbose_name_plural = "Оценки и Посещаемость"
-        # Один студент может получить только одну запись на одном занятии
         unique_together = ('lesson', 'student')
 
     def __str__(self):
         if self.is_absent:
             return f"{self.student.user} - Н ({self.lesson})"
-        return f"{self.student.user} - {self.value} ({self.lesson})"
+        return f"{self.student.user} - {self.value} баллов ({self.lesson})"

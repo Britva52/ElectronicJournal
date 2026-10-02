@@ -1,23 +1,70 @@
 {% extends 'base.html' %}
 
 {% block content %}
+
+    <!-- ЕСЛИ ЗАШЕЛ ПРЕПОДАВАТЕЛЬ -->
+    {% if user.role == 'teacher' %}
+        <div class="card shadow-sm mb-4 border-primary">
+            <div class="card-header bg-primary text-white">
+                <h4 class="m-0">Мои группы (По расписанию)</h4>
+            </div>
+            <div class="card-body">
+                {% if my_groups %}
+                    <div class="row">
+                        {% for group in my_groups %}
+                            <div class="col-md-4 mb-2">
+                                <div class="p-3 border rounded bg-light d-flex justify-content-between align-items-center">
+                                    <span class="fw-bold fs-5">{{ group.name }}</span>
+                                    <a href="{% url 'journal:group_journal' group.id %}" class="btn btn-sm btn-primary">Журнал</a>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="text-muted mb-0">У вас пока нет назначенных занятий в группах.</p>
+                {% endif %}
+            </div>
+        </div>
+    {% endif %}
+
+    <!-- ВСЕ ГРУППЫ (Для замен и для Студентов) -->
     <div class="card shadow-sm">
-        <div class="card-header bg-white">
-            <h2 class="m-0">Учебные группы</h2>
+        <div class="card-header bg-white d-flex justify-content-between align-items-center">
+            <h4 class="m-0">{% if user.role == 'teacher' %}Все группы (Для замен){% else %}Учебные группы{% endif %}</h4>
+
+            <!-- Поле поиска -->
+            <input type="text" id="searchInput" class="form-control form-control-sm w-auto" placeholder="Поиск группы...">
         </div>
         <div class="card-body">
-            {% if groups %}
-                <ul class="list-group">
-                    {% for group in groups %}
-                        <li class="list-group-item d-flex justify-content-between align-items-center">
-                            {{ group.name }}
-                            <a href="#" class="btn btn-sm btn-outline-primary">Посмотреть журнал</a>
+            {% if all_groups %}
+                <ul class="list-group" id="groupsList">
+                    {% for group in all_groups %}
+                        <li class="list-group-item d-flex justify-content-between align-items-center group-item">
+                            <span class="group-name">{{ group.name }}</span>
+                            <a href="{% url 'journal:group_journal' group.id %}" class="btn btn-sm btn-outline-secondary">Посмотреть журнал</a>
                         </li>
                     {% endfor %}
                 </ul>
             {% else %}
-                <p class="text-muted">Группы пока не добавлены. Зайдите в админку и создайте группу.</p>
+                <p class="text-muted">Группы пока не добавлены.</p>
             {% endif %}
         </div>
     </div>
+
+    <!-- Простой JavaScript для работы поиска по буквам -->
+    <script>
+        document.getElementById('searchInput').addEventListener('keyup', function() {
+            let filter = this.value.toLowerCase();
+            let items = document.querySelectorAll('.group-item');
+
+            items.forEach(function(item) {
+                let text = item.querySelector('.group-name').textContent.toLowerCase();
+                if (text.includes(filter)) {
+                    item.style.display = 'flex'; // Показываем
+                } else {
+                    item.style.display = 'none'; // Скрываем
+                }
+            });
+        });
+    </script>
 {% endblock %}

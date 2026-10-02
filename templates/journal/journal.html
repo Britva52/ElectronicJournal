@@ -1,0 +1,114 @@
+{% extends 'base.html' %}
+
+{% block content %}
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2>Журнал группы: <span class="text-primary">{{ group.name }}</span></h2>
+        <a href="{% url 'journal:index' %}" class="btn btn-secondary">Назад к группам</a>
+    </div>
+
+    <div class="card shadow-sm">
+        <div class="card-body p-0" style="overflow-x: auto;">
+            <table class="table table-bordered table-hover text-center m-0">
+                <thead class="table-light">
+                    <tr>
+                        <th class="align-middle text-start px-3">ФИО Студента</th>
+                        <!-- Даты занятий -->
+                        {% for lesson in lessons %}
+                            <th style="min-width: 100px;">
+                                {{ lesson.date|date:"d.m" }}<br>
+                                <small class="text-muted" style="font-size: 0.75rem;">{{ lesson.subject.name }}</small>
+                            </th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in journal_data %}
+                        <tr>
+                            <!-- Имя студента -->
+                            <td class="text-start px-3 fw-bold align-middle">
+                                {{ row.student.user.last_name }} {{ row.student.user.first_name }}
+                                {% if not row.student.user.last_name %}{{ row.student.user.username }}{% endif %}
+                            </td>
+                            
+                            <!-- Клеточки с оценками/баллами -->
+                            {% for item in row.grades %}
+                                <td class="align-middle p-1">
+                                    {% if user.role == 'teacher' or user.role == 'admin' %}
+                                        <!-- УЧИТЕЛЬ: Кликабельная кнопка -->
+                                        <!-- Используем item.lesson.id для уникальности окна -->
+                                        <button class="btn btn-sm w-100 h-100"
+                                                data-bs-toggle="modal"
+                                                data-bs-target="#gradeModal{{ row.student.id }}_{{ item.lesson.id }}">
+                                            {% if item.grade %}
+                                                {% if item.grade.is_absent %}
+                                                    <span class="text-danger fw-bold">Н</span>
+                                                {% elif item.grade.value %}
+                                                    <span class="text-primary fw-bold">{{ item.grade.value }}</span>
+                                                {% endif %}
+                                            {% else %}
+                                                <span class="text-black-50">+</span>
+                                            {% endif %}
+                                        </button>
+
+                                        <!-- ВСПЛЫВАЮЩЕЕ ОКНО ДЛЯ УЧИТЕЛЯ -->
+                                        <div class="modal fade" id="gradeModal{{ row.student.id }}_{{ item.lesson.id }}" tabindex="-1" aria-hidden="true">
+                                            <div class="modal-dialog modal-sm">
+                                                <div class="modal-content text-start">
+                                                    <!-- ТЕПЕРЬ ЗДЕСЬ ПРАВИЛЬНЫЙ ID УРОКА: item.lesson.id -->
+                                                    <form action="{% url 'journal:add_grade' item.lesson.id row.student.id %}" method="post">
+                                                        {% csrf_token %}
+                                                        <div class="modal-header">
+                                                            <h5 class="modal-title">Выставить баллы</h5>
+                                                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                                        </div>
+                                                        <div class="modal-body">
+                                                            <p class="mb-2 small text-muted">Студент: {{ row.student.user.last_name }}</p>
+
+                                                            <div class="mb-3">
+                                                                <label class="form-label">Количество баллов</label>
+                                                                <!-- Подставляем уже существующую оценку, если она есть -->
+                                                                <input type="number" name="value" class="form-control"
+                                                                       placeholder="Например: 3, 15, 20..." min="1" max="100"
+                                                                       value="{% if item.grade and item.grade.value %}{{ item.grade.value }}{% endif %}">
+                                                            </div>
+
+                                                            <div class="form-check mt-3">
+                                                                <!-- Подставляем галочку "Н", если она уже стоит -->
+                                                                <input class="form-check-input" type="checkbox" name="is_absent"
+                                                                       id="absentCheck{{ row.student.id }}_{{ item.lesson.id }}"
+                                                                       {% if item.grade and item.grade.is_absent %}checked{% endif %}>
+                                                                <label class="form-check-label text-danger" for="absentCheck{{ row.student.id }}_{{ item.lesson.id }}">Отсутствовал (Н)</label>
+                                                            </div>
+                                                        </div>
+                                                        <div class="modal-footer">
+                                                            <button type="submit" class="btn btn-primary btn-sm w-100">Сохранить</button>
+                                                        </div>
+                                                    </form>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                    {% else %}
+                                        <!-- СТУДЕНТ: Просто текст -->
+                                        {% if item.grade %}
+                                            {% if item.grade.is_absent %}
+                                                <span class="text-danger fw-bold">Н</span>
+                                            {% elif item.grade.value %}
+                                                <span class="text-primary fw-bold">{{ item.grade.value }}</span>
+                                            {% endif %}
+                                        {% else %}
+                                            <span class="text-black-50">-</span>
+                                        {% endif %}
+                                    {% endif %}
+                                </td>
+                            {% endfor %}
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% if not students %}
+                <div class="p-4 text-center text-muted">В этой группе пока нет студентов.</div>
+            {% endif %}
+        </div>
+    </div>
+{% endblock %}
