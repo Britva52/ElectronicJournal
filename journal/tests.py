@@ -244,3 +244,26 @@ class PortalTests(TestCase):
         response = self.client.get(url)
         self.assertContains(response, '85')
         self.assertNotContains(response, f'gradeModal{self.profile.pk}_{self.lesson.pk}')
+
+    def test_groups_and_screenshot_reference_are_available_without_fake_lessons(self):
+        from .models import ScheduleReference
+        group = StudyGroup.objects.get(name='о-П-923/3')
+        for name in ['о-П-923/1', 'о-П-923/2', 'о-Э-923/1', 'о-Э-923/2', 'о-Э-923/3', 'о-П-1124', 'о-П-924/1']:
+            self.assertTrue(StudyGroup.objects.filter(name=name).exists())
+        self.assertEqual(ScheduleReference.objects.filter(group=group).count(), 18)
+        self.assertFalse(Lesson.objects.filter(group=group).exists())
+        self.client.force_login(self.student)
+        url = reverse('journal:schedule')
+        response = self.client.get(url, {'group': group.pk})
+        self.assertContains(response, 'Образец по вашему скриншоту')
+        self.assertContains(response, 'Математическое моделирование')
+        self.assertContains(response, 'Радинская Л. В.')
+        self.assertContains(response, 'Информационная безопасность')
+        self.assertContains(response, '16:40')
+        Lesson.objects.create(group=group, date=timezone.localdate(), subject=self.subject, teacher=self.teacher)
+        response = self.client.get(url, {'group': group.pk})
+        self.assertNotContains(response, 'Образец по вашему скриншоту')
+        self.assertContains(response, 'Посмотреть образец со скриншота')
+        response = self.client.get(url, {'group': group.pk, 'reference': '1'})
+        self.assertContains(response, 'Образец по вашему скриншоту')
+        self.assertEqual(self.client.get(reverse('journal:group_journal', args=[group.pk])).status_code, 403)

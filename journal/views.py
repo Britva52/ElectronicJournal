@@ -8,7 +8,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from .models import StudyGroup, Lesson, StudentProfile, Grade, GradeChange, News, LibraryResource
+from .models import StudyGroup, Lesson, StudentProfile, Grade, GradeChange, News, LibraryResource, ScheduleReference
 
 
 def home(request):
@@ -76,10 +76,17 @@ def schedule(request):
     for lesson in lessons:
         lesson.display_number = numbers.get(lesson.start_time.strftime('%H:%M')) if lesson.start_time else None
         days[(lesson.date - monday).days]['lessons'].append(lesson)
+    has_lessons = any(day['lessons'] for day in days)
+    references = list(ScheduleReference.objects.filter(group=group).order_by('weekday', 'number')) if group else []
+    show_reference = bool(references) and (not has_lessons or request.GET.get('reference') == '1')
+    if show_reference:
+        for entry in references:
+            days[entry.weekday].setdefault('references', []).append(entry)
     return render(request, 'journal/schedule.html', {
+        'show_reference': show_reference, 'has_reference': bool(references),
         'days': days, 'today': today, 'week_start': monday, 'week_end': monday + timedelta(days=6),
         'previous_week': monday - timedelta(days=7), 'next_week': monday + timedelta(days=7),
-        'group': group, 'groups': groups, 'closest_week': closest_week, 'has_lessons': any(day['lessons'] for day in days),
+        'group': group, 'groups': groups, 'closest_week': closest_week, 'has_lessons': has_lessons,
     })
 
 
