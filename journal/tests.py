@@ -176,3 +176,44 @@ class PortalTests(TestCase):
             response = client.post(reverse('login'), {'username': 'student', 'password': 'pass', 'csrfmiddlewaretoken': csrf})
             self.assertEqual(response.status_code, 302)
             self.assertIn('; Partitioned', response.cookies['sessionid'].OutputString())
+
+    def test_week_schedule_navigation_and_group_permissions(self):
+        from datetime import timedelta
+        admin = get_user_model().objects.create_user(username='schedule_admin', role='admin', password='pass')
+        self.client.force_login(admin)
+        url = reverse('journal:schedule')
+        response = self.client.get(url, {'group': self.group.pk, 'week': self.lesson.date.isoformat()})
+        self.assertContains(response, 'Математика')
+        self.assertContains(response, 'Понедельник')
+        self.assertNotContains(response, 'other')
+        self.assertEqual(self.client.get(url, {'week': 'не-дата'}).status_code, 400)
+        self.assertEqual(self.client.get(url, {'group': 'не-группа'}).status_code, 400)
+        next_week = self.lesson.date + timedelta(days=7)
+        self.assertNotContains(self.client.get(url, {'week': next_week.isoformat()}), 'Математика')
+        self.client.force_login(self.student)
+        response = self.client.get(url, {'group': self.other_group.pk})
+        self.assertContains(response, 'teacher')
+        self.assertNotContains(response, 'other')
+
+    def test_example_schedule_is_isolated_and_idempotent(self):
+        import os
+        from io import StringIO
+        from unittest.mock import patch
+        from django.test import override_settings
+        from django.core.management import call_command, CommandError
+        with patch.dict(os.environ, {'DEMO_PASSWORD': 'Demo2026!'}):
+            with self.assertRaises(CommandError):
+                call_command('seed_example_schedule', stdout=StringIO())
+            with override_settings(ALLOW_EXAMPLE_SCHEDULE=True):
+                call_command('seed_example_schedule', week='2026-10-26', stdout=StringIO())
+                self.assertTrue(StudyGroup.objects.filter(name='о-П-923/3').exists())
+                self.assertTrue(StudyGroup.objects.filter(name='о-Э-923/3').exists())
+                user = get_user_model().objects.get(username='demo_923_student')
+                self.assertTrue(user.check_password('Demo2026!'))
+                self.client.force_login(user)
+                response = self.client.get(reverse('journal:schedule'), {'week': '2026-10-26'})
+                self.assertContains(response, 'Математическое моделирование')
+                self.assertContains(response, '10:10')
+                self.assertNotContains(response, 'о-П-1124')
+                with self.assertRaises(CommandError):
+                    call_command('seed_example_schedule', week='2026-10-26', stdout=StringIO())

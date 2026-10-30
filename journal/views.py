@@ -1,3 +1,4 @@
+from datetime import date, timedelta
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
 from django.db.models import Q
@@ -40,13 +41,43 @@ def student_group(user):
 
 @login_required
 def schedule(request):
-    lessons = Lesson.objects.select_related('group', 'subject', 'teacher').filter(date__gte=timezone.localdate()).order_by('date', 'start_time', 'pk')
+    today = timezone.localdate()
+    try:
+        selected = date.fromisoformat(request.GET.get('week', '')) if request.GET.get('week') else today
+        if not 1901 <= selected.year <= 2098:
+            raise ValueError
+    except ValueError:
+        return HttpResponseBadRequest('Некорректная дата недели.')
+    monday = selected - timedelta(days=selected.weekday())
+    lessons = Lesson.objects.select_related('group', 'subject', 'teacher').filter(
+        date__gte=monday, date__lt=monday + timedelta(days=7)
+    ).order_by('date', 'start_time', 'pk')
+    group = None
+    groups = StudyGroup.objects.none()
     if request.user.role == 'student':
         group = student_group(request.user)
         lessons = lessons.filter(group=group) if group else lessons.none()
     elif request.user.role == 'teacher':
         lessons = lessons.filter(teacher=request.user)
-    return render(request, 'journal/schedule.html', {'page': Paginator(lessons, 30).get_page(request.GET.get('page'))})
+    else:
+        groups = StudyGroup.objects.order_by('name')
+        group_id = request.GET.get('group', '')
+        if group_id:
+            if not group_id.isascii() or not group_id.isdigit() or len(group_id) > 9:
+                return HttpResponseBadRequest('Некорректная группа.')
+            group = get_object_or_404(StudyGroup, pk=int(group_id))
+            lessons = lessons.filter(group=group)
+    day_names = ('Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье')
+    days = [{'date': monday + timedelta(days=i), 'name': name, 'lessons': []} for i, name in enumerate(day_names)]
+    numbers = {'08:30': '1', '10:10': '2', '12:10': '3', '13:50': '4', '15:40': '5', '17:20': '6'}
+    for lesson in lessons:
+        lesson.display_number = numbers.get(lesson.start_time.strftime('%H:%M')) if lesson.start_time else None
+        days[(lesson.date - monday).days]['lessons'].append(lesson)
+    return render(request, 'journal/schedule.html', {
+        'days': days, 'today': today, 'week_start': monday, 'week_end': monday + timedelta(days=6),
+        'previous_week': monday - timedelta(days=7), 'next_week': monday + timedelta(days=7),
+        'group': group, 'groups': groups,
+    })
 
 
 @login_required
