@@ -192,8 +192,8 @@ class PortalTests(TestCase):
         self.assertNotContains(self.client.get(url, {'week': next_week.isoformat()}), 'Математика')
         self.client.force_login(self.student)
         response = self.client.get(url, {'group': self.other_group.pk})
-        self.assertContains(response, 'teacher')
-        self.assertNotContains(response, 'other')
+        self.assertContains(response, 'other')
+        self.assertEqual(self.client.get(reverse('journal:group_journal', args=[self.other_group.pk])).status_code, 403)
 
     def test_example_schedule_is_isolated_and_idempotent(self):
         import os
@@ -214,6 +214,20 @@ class PortalTests(TestCase):
                 response = self.client.get(reverse('journal:schedule'), {'week': '2026-10-26'})
                 self.assertContains(response, 'Математическое моделирование')
                 self.assertContains(response, '10:10')
-                self.assertNotContains(response, 'о-П-1124')
-                with self.assertRaises(CommandError):
-                    call_command('seed_example_schedule', week='2026-10-26', stdout=StringIO())
+                self.assertContains(response, 'о-П-1124')
+                self.assertEqual(len(response.context['days'][0]['lessons']), 4)
+                total = Lesson.objects.count()
+                call_command('seed_example_schedule', week='2026-10-26', stdout=StringIO())
+                self.assertEqual(Lesson.objects.count(), total)
+                call_command('seed_example_schedule', week='2026-11-02', stdout=StringIO())
+                self.assertGreater(Lesson.objects.count(), total)
+
+    def test_empty_week_links_to_existing_week_and_preserves_group_filter(self):
+        self.client.force_login(self.student)
+        response = self.client.get(reverse('journal:schedule'), {
+            'group': self.other_group.pk, 'week': (self.other_lesson.date + timedelta(days=14)).isoformat(),
+        })
+        self.assertContains(response, 'Перейти к ближайшей неделе с занятиями')
+        self.assertContains(response, f'group={self.other_group.pk}')
+        self.assertEqual(self.client.get(reverse('journal:schedule'), {'group': self.other_group.pk}).status_code, 200)
+        self.assertEqual(self.client.get(reverse('journal:group_journal', args=[self.other_group.pk])).status_code, 403)

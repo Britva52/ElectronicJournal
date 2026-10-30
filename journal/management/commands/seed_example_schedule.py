@@ -32,14 +32,21 @@ class Command(BaseCommand):
             raise CommandError('Неделя должна быть датой в формате ГГГГ-ММ-ДД.')
         monday = selected - timedelta(days=selected.weekday())
         User = get_user_model()
-        usernames = ['demo_923_student', 'demo_schedule_teacher']
-        if User.objects.filter(username__in=usernames).exists():
-            raise CommandError('Пример уже добавлен или его логины заняты. Данные не изменены.')
         group_names = ['о-П-923/1', 'о-П-923/2', 'о-П-923/3', 'о-Э-923/1', 'о-Э-923/2', 'о-Э-923/3', 'о-П-1124', 'о-П-924/1']
         groups = {name: StudyGroup.objects.get_or_create(name=name)[0] for name in group_names}
-        student = User.objects.create_user(username='demo_923_student', password=password, role='student', first_name='Демо', last_name='Студент')
-        profile = StudentProfile.objects.create(user=student, group=groups['о-П-923/3'])
-        teacher = User.objects.create_user(username='demo_schedule_teacher', password=password, role='teacher', first_name='Демо', last_name='Преподаватель')
+        student = User.objects.filter(username='demo_923_student').first()
+        if student:
+            profile = StudentProfile.objects.filter(user=student, group=groups['о-П-923/3']).first()
+            if student.role != 'student' or not profile:
+                raise CommandError('Логин demo_923_student занят другой учётной записью. Данные не изменены.')
+        else:
+            student = User.objects.create_user(username='demo_923_student', password=password, role='student', first_name='Демо', last_name='Студент')
+            profile = StudentProfile.objects.create(user=student, group=groups['о-П-923/3'])
+        teacher = User.objects.filter(username='demo_schedule_teacher').first()
+        if teacher and teacher.role != 'teacher':
+            raise CommandError('Логин demo_schedule_teacher занят другой учётной записью. Данные не изменены.')
+        if not teacher:
+            teacher = User.objects.create_user(username='demo_schedule_teacher', password=password, role='teacher', first_name='Демо', last_name='Преподаватель')
         # Содержимое адаптировано по изображению, без утверждения, что оно актуально.
         entries = [
             (0, 2, 'Математическое моделирование', '311'), (0, 3, 'Собрание группы', '218, 2-й корпус'),
@@ -64,10 +71,15 @@ class Command(BaseCommand):
             if title not in subjects:
                 subjects[title] = Subject.objects.get_or_create(name=title)[0]
             for group_name in ('о-П-923/3', 'о-П-1124'):
-                lesson = Lesson.objects.create(group=groups[group_name], date=monday + timedelta(days=day),
+                # Не перезаписываем и не дублируем уже существующие занятия в этом слоте.
+                day_date = monday + timedelta(days=day)
+                if Lesson.objects.filter(group=groups[group_name], date=day_date, start_time=times[number][0]).exists():
+                    continue
+                lesson = Lesson.objects.create(group=groups[group_name], date=day_date,
                     subject=subjects[title], teacher=teacher, start_time=times[number][0], end_time=times[number][1],
                     room=room, topic='Демонстрационный пример по скриншоту; требуется проверка')
-                if first_lesson is None:
+                if first_lesson is None and group_name == 'о-П-923/3':
                     first_lesson = lesson
-        Grade.objects.create(lesson=first_lesson, student=profile, value=85)
-        self.stdout.write(self.style.SUCCESS(f'Пример создан для недели с {monday:%d.%m.%Y}. Это не официальное расписание.'))
+        if first_lesson:
+            Grade.objects.get_or_create(lesson=first_lesson, student=profile, defaults={'value': 85})
+        self.stdout.write(self.style.SUCCESS(f'Пример добавлен для недели с {monday:%d.%m.%Y}; занятые слоты пропущены. Это не официальное расписание.'))

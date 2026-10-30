@@ -49,24 +49,27 @@ def schedule(request):
     except ValueError:
         return HttpResponseBadRequest('Некорректная дата недели.')
     monday = selected - timedelta(days=selected.weekday())
-    lessons = Lesson.objects.select_related('group', 'subject', 'teacher').filter(
-        date__gte=monday, date__lt=monday + timedelta(days=7)
-    ).order_by('date', 'start_time', 'pk')
+    all_lessons = Lesson.objects.select_related('group', 'subject', 'teacher')
+    groups = StudyGroup.objects.order_by('name')
     group = None
-    groups = StudyGroup.objects.none()
-    if request.user.role == 'student':
+    group_id = request.GET.get('group', '')
+    if group_id:
+        if not group_id.isascii() or not group_id.isdigit() or len(group_id) > 9:
+            return HttpResponseBadRequest('Некорректная группа.')
+        group = get_object_or_404(StudyGroup, pk=int(group_id))
+        all_lessons = all_lessons.filter(group=group)
+    elif request.user.role == 'student':
         group = student_group(request.user)
-        lessons = lessons.filter(group=group) if group else lessons.none()
+        all_lessons = all_lessons.filter(group=group) if group else all_lessons.none()
     elif request.user.role == 'teacher':
-        lessons = lessons.filter(teacher=request.user)
-    else:
-        groups = StudyGroup.objects.order_by('name')
-        group_id = request.GET.get('group', '')
-        if group_id:
-            if not group_id.isascii() or not group_id.isdigit() or len(group_id) > 9:
-                return HttpResponseBadRequest('Некорректная группа.')
-            group = get_object_or_404(StudyGroup, pk=int(group_id))
-            lessons = lessons.filter(group=group)
+        all_lessons = all_lessons.filter(teacher=request.user)
+    lessons = all_lessons.filter(date__gte=monday, date__lt=monday + timedelta(days=7)).order_by('date', 'start_time', 'pk')
+    closest_date = None
+    if not lessons.exists():
+        future = all_lessons.filter(date__gte=monday + timedelta(days=7)).order_by('date').values_list('date', flat=True).first()
+        past = all_lessons.filter(date__lt=monday).order_by('-date').values_list('date', flat=True).first()
+        closest_date = min((d for d in (future, past) if d), key=lambda d: abs((d - monday).days), default=None)
+    closest_week = closest_date - timedelta(days=closest_date.weekday()) if closest_date else None
     day_names = ('Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье')
     days = [{'date': monday + timedelta(days=i), 'name': name, 'lessons': []} for i, name in enumerate(day_names)]
     numbers = {'08:30': '1', '10:10': '2', '12:10': '3', '13:50': '4', '15:40': '5', '17:20': '6'}
@@ -76,7 +79,7 @@ def schedule(request):
     return render(request, 'journal/schedule.html', {
         'days': days, 'today': today, 'week_start': monday, 'week_end': monday + timedelta(days=6),
         'previous_week': monday - timedelta(days=7), 'next_week': monday + timedelta(days=7),
-        'group': group, 'groups': groups,
+        'group': group, 'groups': groups, 'closest_week': closest_week, 'has_lessons': any(day['lessons'] for day in days),
     })
 
 
