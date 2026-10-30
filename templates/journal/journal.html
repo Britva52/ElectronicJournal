@@ -28,12 +28,13 @@
                             <td class="text-start px-3 fw-bold align-middle">
                                 {{ row.student.user.last_name }} {{ row.student.user.first_name }}
                                 {% if not row.student.user.last_name %}{{ row.student.user.username }}{% endif %}
+                                {% if row.student.group_id != group.id %}<small class="text-muted d-block">Переведён(а)</small>{% endif %}
                             </td>
                             
                             <!-- Клеточки с оценками/баллами -->
                             {% for item in row.grades %}
                                 <td class="align-middle p-1">
-                                    {% if user.role == 'teacher' or user.role == 'admin' %}
+                                    {% if item.can_edit %}
                                         <!-- УЧИТЕЛЬ: Кликабельная кнопка -->
                                         <!-- Используем item.lesson.id для уникальности окна -->
                                         <button class="btn btn-sm w-100 h-100"

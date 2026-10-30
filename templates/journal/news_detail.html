@@ -1,0 +1,1 @@
+{% extends 'base.html' %}{% block content %}<a href="{% url 'journal:news' %}">← Все новости</a><article class="card mt-3"><div class="card-body"><small class="text-muted">{{ item.published_at|date:'d.m.Y H:i' }}</small><h1 class="mt-2">{{ item.title }}</h1>{{ item.content|linebreaks }}</div></article>{% endblock %}
