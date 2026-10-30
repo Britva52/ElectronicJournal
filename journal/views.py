@@ -1,5 +1,6 @@
 from datetime import date, timedelta
 from django.contrib.auth.decorators import login_required
+from django.contrib import messages
 from django.db import transaction
 from django.db.models import Q
 from django.core.paginator import Paginator
@@ -8,7 +9,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from .models import StudyGroup, Lesson, StudentProfile, Grade, GradeChange, News, LibraryResource, ScheduleReference
+from .models import StudyGroup, Lesson, StudentProfile, Grade, GradeChange, News, LibraryResource, ScheduleReference, Subject
+from .forms import ProfileContactForm
 
 
 def home(request):
@@ -16,9 +18,18 @@ def home(request):
     return render(request, 'journal/home.html', {'news': news})
 
 
+def pagination_query(request):
+    params = request.GET.copy()
+    params.pop('page', None)
+    return params.urlencode()
+
+
 def news_list(request):
     news = News.objects.filter(is_published=True, published_at__lte=timezone.now())
-    return render(request, 'journal/news.html', {'page': Paginator(news, 10).get_page(request.GET.get('page'))})
+    query = request.GET.get('q', '').strip()[:200]
+    if query:
+        news = news.filter(Q(title__icontains=query) | Q(content__icontains=query))
+    return render(request, 'journal/news.html', {'page': Paginator(news, 10).get_page(request.GET.get('page')), 'query': query, 'page_query': pagination_query(request)})
 
 
 def news_detail(request, pk):
@@ -27,11 +38,18 @@ def news_detail(request, pk):
 
 
 def library(request):
-    resources = LibraryResource.objects.filter(is_published=True).select_related('subject')
-    query = request.GET.get('q', '').strip()
+    published = LibraryResource.objects.filter(is_published=True)
+    resources = published.select_related('subject')
+    query = request.GET.get('q', '').strip()[:200]
+    subject_id = request.GET.get('subject', '')
     if query:
-        resources = resources.filter(title__icontains=query)
-    return render(request, 'journal/library.html', {'page': Paginator(resources, 20).get_page(request.GET.get('page')), 'query': query})
+        resources = resources.filter(Q(title__icontains=query) | Q(description__icontains=query))
+    if subject_id:
+        if not subject_id.isascii() or not subject_id.isdigit() or len(subject_id) > 9:
+            return HttpResponseBadRequest('Некорректный предмет.')
+        resources = resources.filter(subject_id=int(subject_id))
+    subjects = Subject.objects.filter(libraryresource__is_published=True).distinct().order_by('name', 'pk')
+    return render(request, 'journal/library.html', {'page': Paginator(resources, 12).get_page(request.GET.get('page')), 'query': query, 'subject_id': subject_id, 'subjects': subjects, 'page_query': pagination_query(request)})
 
 
 def is_journal_admin(user):
@@ -100,6 +118,16 @@ def schedule(request):
 def profile(request):
     group = student_group(request.user) if request.user.role == 'student' else None
     return render(request, 'journal/profile.html', {'group': group})
+
+
+@login_required
+def edit_profile(request):
+    form = ProfileContactForm(request.POST if request.method == 'POST' else None, instance=request.user)
+    if request.method == 'POST' and form.is_valid():
+        form.save()
+        messages.success(request, 'Контактные данные сохранены.')
+        return redirect('journal:profile')
+    return render(request, 'journal/profile_edit.html', {'form': form})
 
 
 @login_required
