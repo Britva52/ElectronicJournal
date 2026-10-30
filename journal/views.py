@@ -34,6 +34,10 @@ def library(request):
     return render(request, 'journal/library.html', {'page': Paginator(resources, 20).get_page(request.GET.get('page')), 'query': query})
 
 
+def is_journal_admin(user):
+    return user.role == 'admin' or user.is_superuser
+
+
 def student_group(user):
     profile = StudentProfile.objects.filter(user=user).select_related('group').first()
     return profile.group if profile else None
@@ -58,10 +62,10 @@ def schedule(request):
             return HttpResponseBadRequest('Некорректная группа.')
         group = get_object_or_404(StudyGroup, pk=int(group_id))
         all_lessons = all_lessons.filter(group=group)
-    elif request.user.role == 'student':
+    elif request.user.role == 'student' and not is_journal_admin(request.user):
         group = student_group(request.user)
         all_lessons = all_lessons.filter(group=group) if group else all_lessons.none()
-    elif request.user.role == 'teacher':
+    elif request.user.role == 'teacher' and not is_journal_admin(request.user):
         all_lessons = all_lessons.filter(teacher=request.user)
     lessons = all_lessons.filter(date__gte=monday, date__lt=monday + timedelta(days=7)).order_by('date', 'start_time', 'pk')
     closest_date = None
@@ -87,6 +91,8 @@ def schedule(request):
         'days': days, 'today': today, 'week_start': monday, 'week_end': monday + timedelta(days=6),
         'previous_week': monday - timedelta(days=7), 'next_week': monday + timedelta(days=7),
         'group': group, 'groups': groups, 'closest_week': closest_week, 'has_lessons': has_lessons,
+        'has_unverified_lessons': any('По скриншоту: дата и актуальность требуют проверки.' in lesson.topic for day in days for lesson in day['lessons']),
+        'journal_admin': is_journal_admin(request.user),
     })
 
 
@@ -99,7 +105,7 @@ def profile(request):
 @login_required
 def index(request):
     all_groups = StudyGroup.objects.all().order_by('name')
-    if request.user.role == 'student':
+    if request.user.role == 'student' and not is_journal_admin(request.user):
         group = student_group(request.user)
         all_groups = all_groups.filter(pk=group.pk) if group else all_groups.none()
     my_groups = StudyGroup.objects.filter(lesson__teacher=request.user).distinct().order_by('name') if request.user.role == 'teacher' else []
@@ -109,12 +115,12 @@ def index(request):
 @login_required
 def group_journal(request, group_id):
     group = get_object_or_404(StudyGroup, id=group_id)
-    if request.user.role == 'student' and not StudentProfile.objects.filter(user=request.user, group=group).exists():
+    if request.user.role == 'student' and not is_journal_admin(request.user) and not StudentProfile.objects.filter(user=request.user, group=group).exists():
         return HttpResponseForbidden('У вас нет доступа к журналу этой группы.')
     students = list(StudentProfile.objects.filter(Q(group=group) | Q(grades__lesson__group=group)).distinct().select_related('user').order_by('user__last_name', 'user__first_name', 'pk'))
     lessons = list(Lesson.objects.filter(group=group).select_related('subject').order_by('date', 'pk'))
     grades = {(g.student_id, g.lesson_id): g for g in Grade.objects.filter(lesson__group=group)}
-    journal_data = [{'student': student, 'grades': [{'lesson': lesson, 'grade': grades.get((student.pk, lesson.pk)), 'can_edit': student.group_id == group.pk and (request.user.role == 'admin' or (request.user.role == 'teacher' and lesson.teacher_id == request.user.pk))} for lesson in lessons]} for student in students]
+    journal_data = [{'student': student, 'grades': [{'lesson': lesson, 'grade': grades.get((student.pk, lesson.pk)), 'can_edit': student.group_id == group.pk and (is_journal_admin(request.user) or (request.user.role == 'teacher' and lesson.teacher_id == request.user.pk))} for lesson in lessons]} for student in students]
     return render(request, 'journal/journal.html', {'group': group, 'students': students, 'lessons': lessons, 'journal_data': journal_data})
 
 
@@ -123,7 +129,7 @@ def group_journal(request, group_id):
 def add_grade(request, lesson_id, student_id):
     lesson = get_object_or_404(Lesson, id=lesson_id)
     student = get_object_or_404(StudentProfile, id=student_id, group=lesson.group)
-    if not (request.user.role == 'admin' or (request.user.role == 'teacher' and lesson.teacher_id == request.user.pk)):
+    if not (is_journal_admin(request.user) or (request.user.role == 'teacher' and lesson.teacher_id == request.user.pk)):
         return HttpResponseForbidden('У вас нет прав для выставления оценок.')
     value = request.POST.get('value', '').strip()
     is_absent = request.POST.get('is_absent') == 'on'

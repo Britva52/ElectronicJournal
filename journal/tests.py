@@ -245,16 +245,18 @@ class PortalTests(TestCase):
         self.assertContains(response, '85')
         self.assertNotContains(response, f'gradeModal{self.profile.pk}_{self.lesson.pk}')
 
-    def test_groups_and_screenshot_reference_are_available_without_fake_lessons(self):
+    def test_groups_and_screenshot_reference_are_available(self):
         from .models import ScheduleReference
         group = StudyGroup.objects.get(name='о-П-923/3')
         for name in ['о-П-923/1', 'о-П-923/2', 'о-Э-923/1', 'о-Э-923/2', 'о-Э-923/3', 'о-П-1124', 'о-П-924/1']:
             self.assertTrue(StudyGroup.objects.filter(name=name).exists())
         self.assertEqual(ScheduleReference.objects.filter(group=group).count(), 18)
-        self.assertFalse(Lesson.objects.filter(group=group).exists())
+        self.assertEqual(Lesson.objects.filter(group=group).count(), 18)
         self.client.force_login(self.student)
         url = reverse('journal:schedule')
         response = self.client.get(url, {'group': group.pk})
+        self.assertContains(response, 'дата и актуальность требуют проверки')
+        response = self.client.get(url, {'group': group.pk, 'reference': '1'})
         self.assertContains(response, 'Образец по вашему скриншоту')
         self.assertContains(response, 'Математическое моделирование')
         self.assertContains(response, 'Радинская Л. В.')
@@ -267,3 +269,17 @@ class PortalTests(TestCase):
         response = self.client.get(url, {'group': group.pk, 'reference': '1'})
         self.assertContains(response, 'Образец по вашему скриншоту')
         self.assertEqual(self.client.get(reverse('journal:group_journal', args=[group.pk])).status_code, 403)
+
+    def test_migrated_students_are_placeholders_and_admin_can_manage_journal(self):
+        group = StudyGroup.objects.get(name='о-П-923/3')
+        names = set(StudentProfile.objects.filter(group=group).values_list('user__first_name', flat=True))
+        self.assertTrue({'Артур', 'Егор', 'Денис', 'Лёша', 'Максим', 'Тимофей', 'Мирон'} <= names)
+        self.assertTrue(all(not p.user.has_usable_password() for p in StudentProfile.objects.filter(group=group).select_related('user')))
+        self.assertTrue(Lesson.objects.filter(group=group, topic__contains='актуальность требуют проверки').exists())
+        root = get_user_model().objects.create_superuser('test_admin', 'a@example.com', 'pass', role='student')
+        self.client.force_login(root)
+        self.assertContains(self.client.get(reverse('journal:index')), 'о-П-923/3')
+        lesson = Lesson.objects.filter(group=group).first()
+        student = StudentProfile.objects.filter(group=group).first()
+        self.assertEqual(self.client.post(reverse('journal:add_grade', args=[lesson.pk, student.pk]), {'value': '77'}).status_code, 302)
+        self.assertEqual(Grade.objects.get(lesson=lesson, student=student).value, 77)
