@@ -1,39 +1,23 @@
-<!DOCTYPE html>
+{% load static %}<!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Электронный журнал</title>
-    <!-- Подключаем Bootstrap для красоты -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Учебный портал КМЭПТ{% endblock %}</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="{% static 'journal/portal.css' %}" rel="stylesheet">
 </head>
-<body class="bg-light">
-
-    <!-- Шапка сайта -->
-    <nav class="navbar navbar-expand-lg navbar-dark bg-primary mb-4">
-        <div class="container">
-            <a class="navbar-brand" href="/">Электронный Журнал</a>
-            <div class="d-flex text-white">
-                {% if user.is_authenticated %}
-                    <span class="me-3 mt-1">Привет, {{ user.username }} ({{ user.get_role_display }})</span>
-                    <form action="{% url 'logout' %}" method="post" class="d-inline">
-                        {% csrf_token %}
-                        <button type="submit" class="btn btn-sm btn-outline-light">Выйти</button>
-                    </form>
-                {% else %}
-                    <span>Вы не вошли в систему</span>
-                {% endif %}
-            </div>
-        </div>
-    </nav>
-
-    <!-- Основной контент страницы -->
-    <div class="container">
-        {% block content %}
-        <!-- Сюда будут вставляться другие страницы -->
-        {% endblock %}
-    </div>
-
+<body>
+<header class="site-header">
+  <div class="container header-inner">
+    <a class="brand" href="{% url 'journal:home' %}" aria-label="На главную"><span class="college-wordmark"><strong>КМЭПТ</strong><small>Колледж мировой экономики<br>и передовых технологий</small></span><span class="brand-divider"></span><span class="eios-wordmark">ЭЛЕКТРОННАЯ<br>ИНФОРМАЦИОННО-<br>ОБРАЗОВАТЕЛЬНАЯ<br>СРЕДА <i></i></span></a>
+    <nav class="main-nav" aria-label="Основная навигация"><a href="{% url 'journal:news' %}">Новости</a><a href="{% url 'journal:schedule' %}">Расписание</a><a href="{% url 'journal:library' %}">Библиотека</a>{% if user.is_authenticated %}<a href="{% url 'journal:index' %}">Журнал</a>{% endif %}</nav>
+    <div class="header-actions">{% if user.is_authenticated %}<a class="account-link" href="{% url 'journal:profile' %}"><span>{{ user.get_full_name|default:user.username }}</span><span class="avatar">{{ user.username|first|upper }}</span></a><form action="{% url 'logout' %}" method="post">{% csrf_token %}<button class="logout-button" type="submit">Выйти</button></form>{% else %}<a class="login-link" href="{% url 'login' %}">Личный кабинет <span>↗</span></a>{% endif %}</div>
+  </div>
+</header>
+<div class="header-stripe"><div class="container">УЧЕБНЫЙ ПОРТАЛ <span>/</span> ПРОЕКТ ДЛЯ КМЭПТ</div></div>
+<div class="container portal-layout {% if not user.is_authenticated %}portal-layout-public{% endif %}">
+{% if user.is_authenticated %}<aside class="portal-sidebar" aria-label="Разделы портала"><div class="sidebar-block"><h2>Меню</h2><a href="{% url 'journal:profile' %}">Мой профиль <span>↗</span></a><a href="{% url 'journal:schedule' %}">Расписание <span>↗</span></a><a href="{% url 'journal:index' %}">Электронный журнал <span>↗</span></a><a href="{% url 'journal:news' %}">Новости <span>↗</span></a></div><div class="sidebar-block"><h2>Учебные материалы</h2><p>Полезные ресурсы для учёбы и самостоятельной работы.</p><a href="{% url 'journal:library' %}">Электронная библиотека <span>↗</span></a></div>{% if user.is_staff %}<div class="sidebar-block"><h2>Управление</h2><a href="{% url 'admin:index' %}">Админ-панель <span>↗</span></a></div>{% endif %}</aside>{% endif %}
+<main class="page-content">{% block content %}{% endblock %}</main></div>
+<footer class="site-footer"><div class="container footer-inner"><span>Учебный портал КМЭПТ · курсовой проект</span><span>Электронная образовательная среда <span class="footer-star">✳</span></span></div></footer>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-</body>
-</html>
+</body></html>
