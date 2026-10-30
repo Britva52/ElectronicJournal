@@ -231,3 +231,16 @@ class PortalTests(TestCase):
         self.assertContains(response, f'group={self.other_group.pk}')
         self.assertEqual(self.client.get(reverse('journal:schedule'), {'group': self.other_group.pk}).status_code, 200)
         self.assertEqual(self.client.get(reverse('journal:group_journal', args=[self.other_group.pk])).status_code, 403)
+
+    def test_classic_journal_shows_edit_control_only_for_authorized_teacher(self):
+        Grade.objects.create(lesson=self.lesson, student=self.profile, value=85)
+        url = reverse('journal:group_journal', args=[self.group.pk])
+        self.client.force_login(self.teacher)
+        response = self.client.get(url)
+        self.assertContains(response, '85')
+        self.assertContains(response, f'gradeModal{self.profile.pk}_{self.lesson.pk}')
+        self.assertContains(response, reverse('journal:add_grade', args=[self.lesson.pk, self.profile.pk]))
+        self.client.force_login(self.student)
+        response = self.client.get(url)
+        self.assertContains(response, '85')
+        self.assertNotContains(response, f'gradeModal{self.profile.pk}_{self.lesson.pk}')
