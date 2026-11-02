@@ -122,6 +122,14 @@ class Grade(models.Model):
         return f"{self.student.user} - {self.value} баллов ({self.lesson})"
 
 class News(models.Model):
+    BANNERS = [
+        ('', 'Без изображения'),
+        ('journal/news/holiday.png', 'Выходной день'),
+        ('journal/news/dedication.png', 'Посвящение в студенты'),
+        ('journal/news/assignments.png', 'Дополнительные задания'),
+        ('journal/news/assessment.png', 'Текущий контроль'),
+    ]
+    banner = models.CharField('Изображение', max_length=100, choices=BANNERS, blank=True)
     title = models.CharField('Заголовок', max_length=200)
     content = models.TextField('Текст')
     published_at = models.DateTimeField('Дата публикации')
@@ -227,3 +235,18 @@ class ScheduleReference(models.Model):
 
     def __str__(self):
         return f'{self.group} — {self.get_weekday_display()}, {self.number}: {self.subject}'
+
+
+class ScheduleClosure(models.Model):
+    group = models.ForeignKey(StudyGroup, on_delete=models.CASCADE, verbose_name='Группа')
+    date = models.DateField('Дата')
+    reason = models.CharField('Причина', max_length=200)
+
+    class Meta:
+        verbose_name = 'Отмена занятий'
+        verbose_name_plural = 'Отмена занятий'
+        ordering = ['-date', 'group__name']
+        constraints = [models.UniqueConstraint(fields=['group', 'date'], name='unique_group_closure_date')]
+
+    def __str__(self):
+        return f'{self.group} — {self.date}: {self.reason}'

@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
 from django.core.paginator import Paginator
@@ -9,7 +10,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from .models import StudyGroup, Lesson, StudentProfile, Grade, GradeChange, News, LibraryResource, ScheduleReference, Subject
+from .models import StudyGroup, Lesson, StudentProfile, Grade, GradeChange, News, LibraryResource, ScheduleReference, ScheduleClosure, Subject
 from .forms import ProfileContactForm
 
 
@@ -25,6 +26,7 @@ def pagination_query(request):
 
 
 def news_list(request):
+    # показываем только опубликованные новости
     news = News.objects.filter(is_published=True, published_at__lte=timezone.now())
     query = request.GET.get('q', '').strip()[:200]
     if query:
@@ -75,6 +77,7 @@ def schedule(request):
     groups = StudyGroup.objects.order_by('name')
     group = None
     group_id = request.GET.get('group', '')
+    # расписание можно смотреть по группе
     if group_id:
         if not group_id.isascii() or not group_id.isdigit() or len(group_id) > 9:
             return HttpResponseBadRequest('Некорректная группа.')
@@ -85,7 +88,15 @@ def schedule(request):
         all_lessons = all_lessons.filter(group=group) if group else all_lessons.none()
     elif request.user.role == 'teacher' and not is_journal_admin(request.user):
         all_lessons = all_lessons.filter(teacher=request.user)
-    lessons = all_lessons.filter(date__gte=monday, date__lt=monday + timedelta(days=7)).order_by('date', 'start_time', 'pk')
+    # отмены не удаляют занятия из журнала
+    closures = ScheduleClosure.objects.filter(date__gte=monday, date__lt=monday + timedelta(days=7))
+    if group:
+        closures = closures.filter(group=group)
+    closures = list(closures)
+    lessons = all_lessons.filter(date__gte=monday, date__lt=monday + timedelta(days=7))
+    for closure in closures:
+        lessons = lessons.exclude(group_id=closure.group_id, date=closure.date)
+    lessons = lessons.order_by('date', 'start_time', 'pk')
     closest_date = None
     if not lessons.exists():
         future = all_lessons.filter(date__gte=monday + timedelta(days=7)).order_by('date').values_list('date', flat=True).first()
@@ -94,13 +105,16 @@ def schedule(request):
     closest_week = closest_date - timedelta(days=closest_date.weekday()) if closest_date else None
     day_names = ('Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье')
     days = [{'date': monday + timedelta(days=i), 'name': name, 'lessons': []} for i, name in enumerate(day_names)]
+    if group:
+        for closure in closures:
+            days[(closure.date - monday).days]['closure'] = closure
     numbers = {'08:30': '1', '10:10': '2', '12:10': '3', '13:50': '4', '15:40': '5', '17:20': '6'}
     for lesson in lessons:
         lesson.display_number = numbers.get(lesson.start_time.strftime('%H:%M')) if lesson.start_time else None
         days[(lesson.date - monday).days]['lessons'].append(lesson)
     has_lessons = any(day['lessons'] for day in days)
     references = list(ScheduleReference.objects.filter(group=group).order_by('weekday', 'number')) if group else []
-    show_reference = bool(references) and (not has_lessons or request.GET.get('reference') == '1')
+    show_reference = bool(references) and (request.GET.get('reference') == '1' or (not has_lessons and not (group and closures)))
     if show_reference:
         for entry in references:
             days[entry.weekday].setdefault('references', []).append(entry)
@@ -147,9 +161,10 @@ def group_journal(request, group_id):
         return HttpResponseForbidden('У вас нет доступа к журналу этой группы.')
     students = list(StudentProfile.objects.filter(Q(group=group) | Q(grades__lesson__group=group)).distinct().select_related('user').order_by('user__last_name', 'user__first_name', 'pk'))
     lessons = list(Lesson.objects.filter(group=group).select_related('subject').order_by('date', 'pk'))
+    # собираем отметки одним запросом
     grades = {(g.student_id, g.lesson_id): g for g in Grade.objects.filter(lesson__group=group)}
     journal_data = [{'student': student, 'grades': [{'lesson': lesson, 'grade': grades.get((student.pk, lesson.pk)), 'can_edit': student.group_id == group.pk and (is_journal_admin(request.user) or (request.user.role == 'teacher' and lesson.teacher_id == request.user.pk))} for lesson in lessons]} for student in students]
-    return render(request, 'journal/journal.html', {'group': group, 'students': students, 'lessons': lessons, 'journal_data': journal_data})
+    return render(request, 'journal/journal.html', {'group': group, 'students': students, 'lessons': lessons, 'journal_data': journal_data, 'demo_grades': getattr(settings, 'ALLOW_EXAMPLE_SCHEDULE', False)})
 
 
 @login_required

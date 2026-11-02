@@ -108,3 +108,11 @@ class ScheduleReferenceAdmin(admin.ModelAdmin):
     list_display = ('group', 'weekday', 'number', 'subject', 'teacher', 'start_time', 'end_time', 'room')
     list_filter = ('group', 'weekday')
     search_fields = ('group__name', 'subject', 'teacher', 'room')
+
+from .models import ScheduleClosure
+
+@admin.register(ScheduleClosure)
+class ScheduleClosureAdmin(admin.ModelAdmin):
+    list_display = ('date', 'group', 'reason')
+    list_filter = ('date', 'group')
+    search_fields = ('group__name', 'reason')

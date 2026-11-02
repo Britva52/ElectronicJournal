@@ -290,7 +290,7 @@ class PortalTests(TestCase):
         response = self.client.get(reverse('journal:news'), {'q': 'Уникальный'})
         self.assertContains(response, public.title)
         self.assertNotContains(response, private.title)
-        self.assertContains(self.client.get(reverse('journal:news')), '[Пример]')
+        self.assertContains(self.client.get(reverse('journal:news')), '4 ноября — выходной день')
         self.assertEqual(self.client.get(reverse('journal:news_detail', args=[private.pk])).status_code, 404)
         self.assertContains(self.client.get(reverse('journal:news_detail', args=[public.pk])), public.content)
 
@@ -327,3 +327,76 @@ class PortalTests(TestCase):
         self.assertEqual(self.student.role, 'student')
         self.assertFalse(self.student.is_superuser)
         self.assertContains(self.client.get(reverse('journal:profile')), 'student@example.org')
+
+    def test_college_news_banners_and_library_links(self):
+        titles = ['4 ноября — выходной день', 'Посвящение в студенты: созвездие талантов', 'Дополнительные задания по дисциплинам', 'Текущий контроль по дисциплинам']
+        for title in titles:
+            news = News.objects.get(title=title)
+            self.assertTrue(news.is_published)
+            self.assertTrue(news.banner.startswith('journal/news/'))
+            self.assertIn('дату его публикации необходимо уточнить', news.content)
+        self.assertTrue(LibraryResource.objects.filter(url='https://ibooks.ru/', is_published=True).exists())
+        self.assertTrue(LibraryResource.objects.filter(url='https://urait.ru/', is_published=True).exists())
+        self.assertFalse(News.objects.get(title='[Пример] Добро пожаловать на учебный портал').is_published)
+
+    def test_coursework_demo_is_isolated_and_preserves_marks(self):
+        from io import StringIO
+        from django.core.management import call_command, CommandError
+        from django.test import override_settings
+        from datetime import date
+        from .models import ScheduleClosure
+        with self.assertRaises(CommandError):
+            call_command('seed_coursework_demo', stdout=StringIO())
+        with override_settings(ALLOW_EXAMPLE_SCHEDULE=True):
+            call_command('seed_coursework_demo', stdout=StringIO())
+            group = StudyGroup.objects.get(name='о-П-923/3')
+            students = StudentProfile.objects.filter(group=group, user__username__startswith='draft_9233_')
+            self.assertEqual(students.count(), 7)
+            for student in students:
+                self.assertTrue(Grade.objects.filter(student=student).exists())
+            self.assertTrue(ScheduleClosure.objects.filter(group=group, date=date(2026, 11, 4)).exists())
+            grade = Grade.objects.filter(student__in=students).first()
+            grade.value = 51
+            grade.save()
+            count = Grade.objects.count()
+            call_command('seed_coursework_demo', stdout=StringIO())
+            grade.refresh_from_db()
+            self.assertEqual(grade.value, 51)
+            self.assertEqual(Grade.objects.count(), count)
+            self.client.force_login(self.student)
+            response = self.client.get(reverse('journal:schedule'), {'group': group.pk, 'week': '2026-11-02'})
+            self.assertContains(response, 'Праздничный день')
+            wednesday = response.context['days'][2]
+            self.assertFalse(wednesday['lessons'])
+            self.assertEqual(wednesday['closure'].reason, 'Праздничный день')
+
+    def test_closure_without_other_lessons_does_not_show_reference_as_real(self):
+        from datetime import date
+        from .models import ScheduleClosure
+        group = StudyGroup.objects.get(name='о-П-923/3')
+        ScheduleClosure.objects.create(group=group, date=date(2026, 12, 9), reason='Отмена')
+        self.client.force_login(self.student)
+        response = self.client.get(reverse('journal:schedule'), {'group': group.pk, 'week': '2026-12-07'})
+        self.assertContains(response, 'Отмена')
+        self.assertFalse(response.context['show_reference'])
+
+    def test_coursework_demo_does_not_replace_edited_or_graded_lessons(self):
+        from io import StringIO
+        from datetime import date, time
+        from django.core.management import call_command
+        from django.test import override_settings
+        group = StudyGroup.objects.get(name='о-П-923/3')
+        teacher = get_user_model().objects.get(username='draft_teacher_radinskaya')
+        subject = Subject.objects.filter(name='Численные методы').first()
+        day = date(2026, 11, 7)
+        existing = Lesson.objects.filter(group=group, date=day, start_time=time(13, 50)).first()
+        if existing is None:
+            existing = Lesson.objects.create(group=group, date=day, start_time=time(13, 50), end_time=time(15, 20), teacher=teacher, subject=subject, room='311')
+        existing.topic = 'Ручная корректировка'
+        existing.save()
+        with override_settings(ALLOW_EXAMPLE_SCHEDULE=True):
+            call_command('seed_coursework_demo', stdout=StringIO())
+        existing.refresh_from_db()
+        self.assertEqual(existing.topic, 'Ручная корректировка')
+        self.assertEqual(existing.start_time, time(13, 50))
+        self.assertFalse(Lesson.objects.filter(group=group, date=day, start_time=time(13, 40)).exists())
