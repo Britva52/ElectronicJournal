@@ -176,3 +176,154 @@ class PortalTests(TestCase):
             response = client.post(reverse('login'), {'username': 'student', 'password': 'pass', 'csrfmiddlewaretoken': csrf})
             self.assertEqual(response.status_code, 302)
             self.assertIn('; Partitioned', response.cookies['sessionid'].OutputString())
+
+    def test_week_schedule_navigation_and_group_permissions(self):
+        from datetime import timedelta
+        admin = get_user_model().objects.create_user(username='schedule_admin', role='admin', password='pass')
+        self.client.force_login(admin)
+        url = reverse('journal:schedule')
+        response = self.client.get(url, {'group': self.group.pk, 'week': self.lesson.date.isoformat()})
+        self.assertContains(response, 'Математика')
+        self.assertContains(response, 'Понедельник')
+        self.assertNotContains(response, 'other')
+        self.assertEqual(self.client.get(url, {'week': 'не-дата'}).status_code, 400)
+        self.assertEqual(self.client.get(url, {'group': 'не-группа'}).status_code, 400)
+        next_week = self.lesson.date + timedelta(days=7)
+        self.assertNotContains(self.client.get(url, {'week': next_week.isoformat()}), 'Математика')
+        self.client.force_login(self.student)
+        response = self.client.get(url, {'group': self.other_group.pk})
+        self.assertContains(response, 'other')
+        self.assertEqual(self.client.get(reverse('journal:group_journal', args=[self.other_group.pk])).status_code, 403)
+
+    def test_example_schedule_is_isolated_and_idempotent(self):
+        import os
+        from io import StringIO
+        from unittest.mock import patch
+        from django.test import override_settings
+        from django.core.management import call_command, CommandError
+        with patch.dict(os.environ, {'DEMO_PASSWORD': 'Demo2026!'}):
+            with self.assertRaises(CommandError):
+                call_command('seed_example_schedule', stdout=StringIO())
+            with override_settings(ALLOW_EXAMPLE_SCHEDULE=True):
+                call_command('seed_example_schedule', week='2026-10-26', stdout=StringIO())
+                self.assertTrue(StudyGroup.objects.filter(name='о-П-923/3').exists())
+                self.assertTrue(StudyGroup.objects.filter(name='о-Э-923/3').exists())
+                user = get_user_model().objects.get(username='demo_923_student')
+                self.assertTrue(user.check_password('Demo2026!'))
+                self.client.force_login(user)
+                response = self.client.get(reverse('journal:schedule'), {'week': '2026-10-26'})
+                self.assertContains(response, 'Математическое моделирование')
+                self.assertContains(response, '10:10')
+                self.assertContains(response, 'о-П-1124')
+                self.assertEqual(len(response.context['days'][0]['lessons']), 4)
+                total = Lesson.objects.count()
+                call_command('seed_example_schedule', week='2026-10-26', stdout=StringIO())
+                self.assertEqual(Lesson.objects.count(), total)
+                call_command('seed_example_schedule', week='2026-11-02', stdout=StringIO())
+                self.assertGreater(Lesson.objects.count(), total)
+
+    def test_empty_week_links_to_existing_week_and_preserves_group_filter(self):
+        self.client.force_login(self.student)
+        response = self.client.get(reverse('journal:schedule'), {
+            'group': self.other_group.pk, 'week': (self.other_lesson.date + timedelta(days=14)).isoformat(),
+        })
+        self.assertContains(response, 'Перейти к ближайшей неделе с занятиями')
+        self.assertContains(response, f'group={self.other_group.pk}')
+        self.assertEqual(self.client.get(reverse('journal:schedule'), {'group': self.other_group.pk}).status_code, 200)
+        self.assertEqual(self.client.get(reverse('journal:group_journal', args=[self.other_group.pk])).status_code, 403)
+
+    def test_classic_journal_shows_edit_control_only_for_authorized_teacher(self):
+        Grade.objects.create(lesson=self.lesson, student=self.profile, value=85)
+        url = reverse('journal:group_journal', args=[self.group.pk])
+        self.client.force_login(self.teacher)
+        response = self.client.get(url)
+        self.assertContains(response, '85')
+        self.assertContains(response, f'gradeModal{self.profile.pk}_{self.lesson.pk}')
+        self.assertContains(response, reverse('journal:add_grade', args=[self.lesson.pk, self.profile.pk]))
+        self.client.force_login(self.student)
+        response = self.client.get(url)
+        self.assertContains(response, '85')
+        self.assertNotContains(response, f'gradeModal{self.profile.pk}_{self.lesson.pk}')
+
+    def test_groups_and_screenshot_reference_are_available(self):
+        from .models import ScheduleReference
+        group = StudyGroup.objects.get(name='о-П-923/3')
+        for name in ['о-П-923/1', 'о-П-923/2', 'о-Э-923/1', 'о-Э-923/2', 'о-Э-923/3', 'о-П-1124', 'о-П-924/1']:
+            self.assertTrue(StudyGroup.objects.filter(name=name).exists())
+        self.assertEqual(ScheduleReference.objects.filter(group=group).count(), 18)
+        self.assertEqual(Lesson.objects.filter(group=group).count(), 18)
+        self.client.force_login(self.student)
+        url = reverse('journal:schedule')
+        response = self.client.get(url, {'group': group.pk})
+        self.assertContains(response, 'дата и актуальность требуют проверки')
+        response = self.client.get(url, {'group': group.pk, 'reference': '1'})
+        self.assertContains(response, 'Образец по вашему скриншоту')
+        self.assertContains(response, 'Математическое моделирование')
+        self.assertContains(response, 'Радинская Л. В.')
+        self.assertContains(response, 'Информационная безопасность')
+        self.assertContains(response, '16:40')
+        Lesson.objects.create(group=group, date=timezone.localdate(), subject=self.subject, teacher=self.teacher)
+        response = self.client.get(url, {'group': group.pk})
+        self.assertNotContains(response, 'Образец по вашему скриншоту')
+        self.assertContains(response, 'Посмотреть образец со скриншота')
+        response = self.client.get(url, {'group': group.pk, 'reference': '1'})
+        self.assertContains(response, 'Образец по вашему скриншоту')
+        self.assertEqual(self.client.get(reverse('journal:group_journal', args=[group.pk])).status_code, 403)
+
+    def test_migrated_students_are_placeholders_and_admin_can_manage_journal(self):
+        group = StudyGroup.objects.get(name='о-П-923/3')
+        names = set(StudentProfile.objects.filter(group=group).values_list('user__first_name', flat=True))
+        self.assertTrue({'Артур', 'Егор', 'Денис', 'Лёша', 'Максим', 'Тимофей', 'Мирон'} <= names)
+        self.assertTrue(all(not p.user.has_usable_password() for p in StudentProfile.objects.filter(group=group).select_related('user')))
+        self.assertTrue(Lesson.objects.filter(group=group, topic__contains='актуальность требуют проверки').exists())
+        root = get_user_model().objects.create_superuser('test_admin', 'a@example.com', 'pass', role='student')
+        self.client.force_login(root)
+        self.assertContains(self.client.get(reverse('journal:index')), 'о-П-923/3')
+        lesson = Lesson.objects.filter(group=group).first()
+        student = StudentProfile.objects.filter(group=group).first()
+        self.assertEqual(self.client.post(reverse('journal:add_grade', args=[lesson.pk, student.pk]), {'value': '77'}).status_code, 302)
+        self.assertEqual(Grade.objects.get(lesson=lesson, student=student).value, 77)
+
+    def test_news_search_only_public_and_demo_content_visible(self):
+        public = News.objects.create(title='Уникальный открытый материал', content='Содержимое', is_published=True, published_at=timezone.now())
+        private = News.objects.create(title='Уникальный черновик', content='Содержимое', is_published=False, published_at=timezone.now())
+        response = self.client.get(reverse('journal:news'), {'q': 'Уникальный'})
+        self.assertContains(response, public.title)
+        self.assertNotContains(response, private.title)
+        self.assertContains(self.client.get(reverse('journal:news')), '[Пример]')
+        self.assertEqual(self.client.get(reverse('journal:news_detail', args=[private.pk])).status_code, 404)
+        self.assertContains(self.client.get(reverse('journal:news_detail', args=[public.pk])), public.content)
+
+    def test_library_filters_search_and_pagination(self):
+        subject = Subject.objects.create(name='Тестирование систем')
+        other_subject = Subject.objects.create(name='Скрытый предмет')
+        for i in range(13):
+            LibraryResource.objects.create(title=f'Учебный материал {i:02}', description='особая метка', subject=subject, url='https://example.org', is_published=True)
+        LibraryResource.objects.create(title='Секретный', description='особая метка', subject=other_subject, url='https://example.org', is_published=False)
+        url = reverse('journal:library')
+        response = self.client.get(url, {'q': 'особая метка', 'subject': subject.pk})
+        self.assertEqual(response.context['page'].paginator.count, 13)
+        self.assertNotContains(response, 'Секретный')
+        self.assertNotContains(response, 'Скрытый предмет')
+        self.assertContains(response, 'subject=')
+        self.assertContains(response, 'page=2')
+        self.assertEqual(self.client.get(url, {'subject': 'bad'}).status_code, 400)
+        response = self.client.get(url, {'q': 'особая метка', 'subject': subject.pk, 'page': 2})
+        self.assertEqual(len(response.context['page'].object_list), 1)
+        self.assertContains(response, 'Сбросить')
+
+    def test_profile_edit_contact_is_limited_to_current_user(self):
+        url = reverse('journal:profile_edit')
+        self.assertEqual(self.client.get(url).status_code, 302)
+        self.client.force_login(self.student)
+        response = self.client.post(url, {'email': 'bad-email', 'role': 'admin'})
+        self.assertEqual(response.status_code, 200)
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.role, 'student')
+        response = self.client.post(url, {'email': 'student@example.org', 'role': 'admin', 'is_superuser': 'on'})
+        self.assertRedirects(response, reverse('journal:profile'))
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.email, 'student@example.org')
+        self.assertEqual(self.student.role, 'student')
+        self.assertFalse(self.student.is_superuser)
+        self.assertContains(self.client.get(reverse('journal:profile')), 'student@example.org')

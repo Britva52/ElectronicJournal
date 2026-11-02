@@ -187,3 +187,43 @@ class StudentTransfer(models.Model):
 
     def __str__(self):
         return f"{self.student_name}: {self.old_group} → {self.new_group}"
+
+
+class ScheduleReference(models.Model):
+    """Неподтверждённый образец недели, не является проведённым занятием журнала."""
+    class Weekday(models.IntegerChoices):
+        MONDAY = 0, 'Понедельник'
+        TUESDAY = 1, 'Вторник'
+        WEDNESDAY = 2, 'Среда'
+        THURSDAY = 3, 'Четверг'
+        FRIDAY = 4, 'Пятница'
+        SATURDAY = 5, 'Суббота'
+        SUNDAY = 6, 'Воскресенье'
+
+    group = models.ForeignKey(StudyGroup, on_delete=models.CASCADE, related_name='schedule_reference', verbose_name='Группа')
+    weekday = models.PositiveSmallIntegerField('День недели', choices=Weekday.choices)
+    number = models.PositiveSmallIntegerField('Номер пары')
+    subject = models.CharField('Предмет', max_length=200)
+    teacher = models.CharField('Преподаватель (как на скриншоте)', max_length=200, blank=True)
+    room = models.CharField('Аудитория', max_length=100, blank=True)
+    start_time = models.TimeField('Начало', null=True, blank=True)
+    end_time = models.TimeField('Окончание', null=True, blank=True)
+    note = models.CharField('Примечание', max_length=255, blank=True)
+
+    def clean(self):
+        super().clean()
+        if self.number is not None and not 1 <= self.number <= 10:
+            raise ValidationError({'number': 'Укажите номер пары от 1 до 10.'})
+        if self.end_time and not self.start_time:
+            raise ValidationError({'start_time': 'Укажите время начала.'})
+        if self.start_time and self.end_time and self.end_time <= self.start_time:
+            raise ValidationError({'end_time': 'Время окончания должно быть позже начала.'})
+
+    class Meta:
+        verbose_name = 'Образец пары по скриншоту'
+        verbose_name_plural = 'Образец расписания по скриншоту'
+        ordering = ['weekday', 'number', 'pk']
+        constraints = [models.UniqueConstraint(fields=['group', 'weekday', 'number'], name='unique_reference_group_day_number')]
+
+    def __str__(self):
+        return f'{self.group} — {self.get_weekday_display()}, {self.number}: {self.subject}'

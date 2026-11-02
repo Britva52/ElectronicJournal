@@ -100,3 +100,11 @@ class AdminLogEntryAdmin(admin.ModelAdmin):
         return False
     def has_delete_permission(self, request, obj=None):
         return False
+
+from .models import ScheduleReference
+
+@admin.register(ScheduleReference)
+class ScheduleReferenceAdmin(admin.ModelAdmin):
+    list_display = ('group', 'weekday', 'number', 'subject', 'teacher', 'start_time', 'end_time', 'room')
+    list_filter = ('group', 'weekday')
+    search_fields = ('group__name', 'subject', 'teacher', 'room')
