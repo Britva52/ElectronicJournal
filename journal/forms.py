@@ -3,6 +3,7 @@ from django.contrib.auth import get_user_model
 
 
 class ProfileContactForm(forms.ModelForm):
+    # имя, группу и роль меняет администратор
     class Meta:
         model = get_user_model()
         fields = ('email',)
